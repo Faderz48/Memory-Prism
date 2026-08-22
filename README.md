@@ -1,4 +1,4 @@
-<img width="1189" height="792" alt="memscreen" src="https://github.com/user-attachments/assets/7d2f375f-1739-4488-bb5e-c287314ec134" />
+
 # Memory Prism
 
 **A PS3 PS2 memory card Adapter manager for Linux.**
