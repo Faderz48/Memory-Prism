@@ -1,3 +1,4 @@
+<img width="1189" height="792" alt="memscreen" src="https://github.com/user-attachments/assets/7d2f375f-1739-4488-bb5e-c287314ec134" />
 # Memory Prism
 
 **A PS3 PS2 memory card Adapter manager for Linux.**
@@ -8,6 +9,7 @@ browser that renders the textured, animated icon models stored inside the
 saves. No PS2 BIOS or emulator is required.
 
 ![Memory Prism showing real save icons](docs/memory-prism-v0.3.0.png)
+<img width="1189" height="792" alt="memscreen" src="https://github.com/user-attachments/assets/bf8ace6d-d0ae-4333-96ce-da9fd0c246e3" />
 
 > [!IMPORTANT]
 > Adapter access is read-only in v0.3.0. Memory Prism cannot alter or erase a
