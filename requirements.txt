@@ -1,0 +1,4 @@
+cryptography>=2.8
+moderngl==5.8.2
+numpy==1.24.4
+PyQt5>=5.14

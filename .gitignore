@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.AppImage
+*.AppImage.zsync
+/bin/ps2vmc-tool
+/third_party/ps2vmc-tool/*.o
+/third_party/ps2vmc-tool/src/*.o
+/third_party/ps2vmc-tool/ps1vmc-tool
+/third_party/ps2vmc-tool/ps2vmc-tool

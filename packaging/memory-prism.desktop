@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Memory Prism
+Comment=Browse PS2 memory cards with a compatible USB adapter
+Exec=memory-prism
+Icon=memory-prism
+Categories=Utility;Game;
+Terminal=false
