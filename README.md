@@ -1,6 +1,6 @@
 # Memory Prism
 
-**A PS2 memory card manager for Linux.**
+**A PS3 PS2 memory card Adapter manager for Linux.**
 
 Memory Prism reads real PS2 memory cards through a compatible PS3 USB memory
 card adapter. It combines a practical save manager with a PS2-inspired 3D
