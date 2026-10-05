@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.1 - 2026-10-05
+
+- Fixed an AppImage crash when opening file selection dialogs on systems whose
+  GTK and GLib libraries differ from the bundled runtime.
+
 ## v0.4.0 - 2026-10-05
 
 - Added protected physical-card file writes for updating `.elf` and other files.

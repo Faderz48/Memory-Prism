@@ -1134,6 +1134,9 @@ def main() -> int:
     parser.add_argument("--screenshot", type=Path)
     parser.add_argument("--ps2-view", action="store_true")
     options = parser.parse_args()
+    # Native GTK dialogs can load host GLib libraries into the AppImage process
+    # and abort when their versions differ from the bundled Qt dependencies.
+    QApplication.setAttribute(Qt.AA_DontUseNativeDialogs, True)
     app = QApplication(sys.argv[:1])
     app.setApplicationName("Memory Prism")
     window = MainWindow(options.image, options.screenshot, options.ps2_view)
