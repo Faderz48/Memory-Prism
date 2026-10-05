@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.2 - 2026-10-05
+
+- Fixed PowerWave page writes being acknowledged but ignored because the USB
+  write packet was padded beyond its protocol trailer.
+- Retained immediate page read-back verification and stop-on-failure behavior.
+
 ## v0.4.1 - 2026-10-05
 
 - Fixed an AppImage crash when opening file selection dialogs on systems whose

@@ -141,9 +141,12 @@ class LibUSB:
             self.lib.libusb_exit(self.context)
             self.context = ctypes.c_void_p()
 
-    def write(self, data: bytes, timeout: int = 5000) -> None:
-        padded_size = max(64, (len(data) + 63) & ~63)
-        packet = data.ljust(padded_size, b"\0")
+    def write(self, data: bytes, timeout: int = 5000, pad: bool = True) -> None:
+        if pad:
+            padded_size = max(64, (len(data) + 63) & ~63)
+            packet = data.ljust(padded_size, b"\0")
+        else:
+            packet = data
         buffer = (ctypes.c_ubyte * len(packet)).from_buffer_copy(packet)
         transferred = ctypes.c_int()
         result = self.lib.libusb_bulk_transfer(
@@ -186,8 +189,8 @@ class PowerWaveReader:
     def __exit__(self, *_args: object) -> None:
         self.usb.close()
 
-    def _command(self, payload: bytes) -> None:
-        self.usb.write(b"\xaa" + payload)
+    def _command(self, payload: bytes, pad: bool = True) -> None:
+        self.usb.write(b"\xaa" + payload, pad=pad)
 
     def _long_command(self, payload: bytes) -> None:
         self._command(b"\x42" + struct.pack("<H", len(payload)) + payload)
@@ -384,7 +387,12 @@ class PowerWaveReader:
             raise ValueError("A writable PS2 page must contain 512 or 528 bytes")
 
         self.authenticate()
-        self._command(b"\x57\x03" + struct.pack("<I", page_number) + data + b"\x55\x2b")
+        # The page-write packet must end immediately after its trailer.
+        # PowerWave firmware acknowledges a padded packet but ignores the data.
+        self._command(
+            b"\x57\x03" + struct.pack("<I", page_number) + data + b"\x55\x2b",
+            pad=False,
+        )
         response = self._response()
         if response != b"\x5a":
             raise AdapterError(

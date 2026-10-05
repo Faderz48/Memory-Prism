@@ -44,17 +44,17 @@ Only PS2 memory cards are supported by the graphical application at present.
 
 ## Install the AppImage
 
-1. Download `Memory-Prism-v0.4.1-x86_64.AppImage` from the latest release.
+1. Download `Memory-Prism-v0.4.2-x86_64.AppImage` from the latest release.
 2. Make it executable:
 
    ```bash
-   chmod +x Memory-Prism-v0.4.1-x86_64.AppImage
+   chmod +x Memory-Prism-v0.4.2-x86_64.AppImage
    ```
 
 3. Run it:
 
    ```bash
-   ./Memory-Prism-v0.4.1-x86_64.AppImage
+   ./Memory-Prism-v0.4.2-x86_64.AppImage
    ```
 
 If the adapter is found but cannot be opened, install the included USB rule:

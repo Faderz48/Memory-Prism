@@ -5,6 +5,17 @@ from pathlib import Path
 from reader import AdapterError, CardInfo, PowerWaveReader, page_ecc
 
 
+class FakeUSB:
+    def __init__(self) -> None:
+        self.writes = []
+
+    def write(self, data, timeout=5000, pad=True):
+        self.writes.append((data, timeout, pad))
+
+    def read(self, size=1024, timeout=5000):
+        return b"\x55\x5a"
+
+
 class FakeWriter(PowerWaveReader):
     def __init__(self, image: bytes) -> None:
         self.image = bytearray(image)
@@ -25,6 +36,19 @@ class FakeWriter(PowerWaveReader):
 
 
 class CardWriterTests(unittest.TestCase):
+    def test_page_write_uses_exact_unpadded_packet(self) -> None:
+        reader = PowerWaveReader()
+        reader.usb = FakeUSB()
+        reader._authenticated = True
+
+        reader.write_page(7, bytes(512), verify=False)
+
+        packet, _timeout, pad = reader.usb.writes[0]
+        self.assertEqual(len(packet), 537)
+        self.assertEqual(packet[:7], b"\xaa\x57\x03\x07\0\0\0")
+        self.assertEqual(packet[-2:], b"\x55\x2b")
+        self.assertFalse(pad)
+
     def test_erased_page_ecc(self) -> None:
         expected = bytes.fromhex("77 7f 7f" * 4) + bytes(4)
         self.assertEqual(page_ecc(bytes([0xFF]) * 512), expected)
