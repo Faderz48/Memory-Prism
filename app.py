@@ -6,9 +6,11 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from PyQt5.QtCore import QObject, QSize, Qt, QThread, QTimer, pyqtSignal
@@ -18,7 +20,9 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -45,6 +49,8 @@ APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 TOOL = APP_DIR / "bin" / "ps2vmc-tool"
 DATA_DIR = Path.home() / ".local" / "share" / "memory-prism"
 LIVE_CACHE = DATA_DIR / "live-card-cache.ps2"
+WRITE_STAGING = DATA_DIR / "write-staging.ps2"
+SAFETY_BACKUPS = DATA_DIR / "safety-backups"
 
 
 @dataclass
@@ -74,6 +80,15 @@ class Snapshot:
     free: int
     saves: list[SaveEntry]
     complete: bool = True
+    device: bool = False
+
+
+@dataclass
+class WriteResult:
+    snapshot: Snapshot
+    backup: Path
+    pages_written: int
+    card_path: str
 
 
 def run_tool(image: Path, *arguments: str, cwd: Path | None = None) -> str:
@@ -313,6 +328,7 @@ class CardWorker(QObject):
             else:
                 raise last_error or AdapterError("Could not refresh the memory card")
             snapshot = load_snapshot(self.output, complete=False)
+            snapshot.device = True
             self.progress.emit(100, "Ready")
             self.completed.emit(snapshot)
         except Exception as error:
@@ -341,6 +357,85 @@ class BackupWorker(QObject):
 
                 reader.backup(self.output, update)
             self.completed.emit(self.output)
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
+class WriteFileWorker(QObject):
+    progress = pyqtSignal(int, str)
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, source: Path, card_path: str) -> None:
+        super().__init__()
+        self.source = source
+        self.card_path = card_path
+
+    def run(self) -> None:
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            SAFETY_BACKUPS.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            backup = SAFETY_BACKUPS / f"before-write-{timestamp}.ps2"
+
+            self.progress.emit(1, "Creating a full safety backup")
+            with PowerWaveReader() as reader:
+                def backup_progress(done: int, total: int) -> None:
+                    percent = 1 + int((done / total) * 54)
+                    self.progress.emit(
+                        percent,
+                        f"Creating safety backup  {done * 100 // total}%",
+                    )
+
+                reader.backup(backup, backup_progress)
+
+            self.progress.emit(57, "Preparing the updated card image")
+            shutil.copy2(backup, WRITE_STAGING)
+            parent_path, target_name = self.card_path.rsplit("/", 1)
+            entries = parse_listing(
+                run_tool(WRITE_STAGING, "--list", parent_path or "/")
+            )
+            if any(entry.name == target_name for entry in entries):
+                run_tool(WRITE_STAGING, "--remove", self.card_path)
+            run_tool(
+                WRITE_STAGING,
+                "--inject-file",
+                str(self.source),
+                self.card_path,
+            )
+
+            with tempfile.TemporaryDirectory(prefix="memory-prism-verify-") as directory:
+                extracted = Path(directory) / self.source.name
+                run_tool(
+                    WRITE_STAGING,
+                    "--extract-file",
+                    self.card_path,
+                    str(extracted),
+                )
+                if extracted.read_bytes() != self.source.read_bytes():
+                    raise RuntimeError("The staged file failed verification")
+
+            self.progress.emit(60, "Checking the inserted card before writing")
+            with PowerWaveReader() as reader:
+                def write_progress(done: int, total: int) -> None:
+                    percent = 60 + int((done / total) * 39)
+                    self.progress.emit(
+                        percent,
+                        f"Writing and verifying card pages  {done}/{total}",
+                    )
+
+                pages_written = reader.write_image_changes(
+                    backup,
+                    WRITE_STAGING,
+                    write_progress,
+                )
+
+            snapshot = load_snapshot(WRITE_STAGING)
+            snapshot.device = True
+            self.progress.emit(100, "Write verified")
+            self.completed.emit(
+                WriteResult(snapshot, backup, pages_written, self.card_path)
+            )
         except Exception as error:
             self.failed.emit(str(error))
 
@@ -427,7 +522,7 @@ class MainWindow(QMainWindow):
         heading = QVBoxLayout()
         title = QLabel("Memory Prism")
         title.setObjectName("appTitle")
-        subtitle = QLabel(f"PS2 USB adapter · read-only mode · v{APP_VERSION}")
+        subtitle = QLabel(f"PS2 USB adapter · protected write mode · v{APP_VERSION}")
         subtitle.setObjectName("muted")
         heading.addWidget(title)
         heading.addWidget(subtitle)
@@ -489,12 +584,12 @@ class MainWindow(QMainWindow):
         side.addWidget(self.space_label)
         side.addSpacing(12)
 
-        safe = QLabel("READ ONLY")
+        safe = QLabel("SAFE WRITE")
         safe.setObjectName("safeBadge")
         safe.setAlignment(Qt.AlignCenter)
         safe.setFixedWidth(92)
         side.addWidget(safe)
-        note = QLabel("Browsing and exports never modify the inserted card.")
+        note = QLabel("Card writes begin with a full backup and finish with verification.")
         note.setObjectName("muted")
         note.setWordWrap(True)
         side.addWidget(note)
@@ -632,6 +727,11 @@ class MainWindow(QMainWindow):
         self.files.setTextInteractionFlags(Qt.TextSelectableByMouse)
         detail_layout.addWidget(self.files)
         detail_layout.addStretch()
+        self.write_button = QPushButton("Write file to card…")
+        self.write_button.setEnabled(False)
+        self.write_button.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        self.write_button.clicked.connect(self.write_file_to_card)
+        detail_layout.addWidget(self.write_button)
         self.export_button = QPushButton("Export save (.psu)")
         self.export_button.setEnabled(False)
         self.export_button.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
@@ -655,6 +755,12 @@ class MainWindow(QMainWindow):
         self.open_button.setEnabled(not busy)
         self.backup_button.setEnabled(not busy and self.snapshot is not None)
         self.ps2_view_button.setEnabled(not busy and self.snapshot is not None)
+        self.write_button.setEnabled(
+            not busy
+            and self.snapshot is not None
+            and self.snapshot.device
+            and self.grid.currentRow() >= 0
+        )
 
     def read_card(self) -> None:
         self.pages.setCurrentIndex(1)
@@ -736,6 +842,7 @@ class MainWindow(QMainWindow):
             "Save backup as…" if snapshot.complete else "Create full backup…"
         )
         self.grid.clear()
+        self.write_button.setEnabled(False)
         for save in snapshot.saves:
             pixmap = QPixmap(str(save.icon)) if save.icon else fallback_icon(save.title)
             item = QListWidgetItem(QIcon(pixmap), save.title)
@@ -805,6 +912,108 @@ class MainWindow(QMainWindow):
         self.export_button.setEnabled(self.snapshot.complete)
         self.export_button.setToolTip(
             "" if self.snapshot.complete else "Create a full backup before exporting saves"
+        )
+        self.write_button.setEnabled(self.snapshot.device)
+        self.write_button.setToolTip(
+            "" if self.snapshot.device else "Read a physical card before writing files"
+        )
+
+    def write_file_to_card(self) -> None:
+        if not self.snapshot or not self.snapshot.device or self.grid.currentRow() < 0:
+            return
+        save = self.snapshot.saves[self.grid.currentRow()]
+        source_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose a file to write to the memory card",
+            str(Path.home()),
+            "ELF programs (*.elf *.ELF);;All files (*)",
+        )
+        if not source_name:
+            return
+        source = Path(source_name)
+        target_name, accepted = QInputDialog.getText(
+            self,
+            "Card filename",
+            f"Write into {save.title} as:",
+            QLineEdit.Normal,
+            source.name,
+        )
+        target_name = target_name.strip()
+        if not accepted or not target_name:
+            return
+        try:
+            encoded_name = target_name.encode("ascii")
+        except UnicodeEncodeError:
+            QMessageBox.warning(
+                self,
+                "Unsupported filename",
+                "Use an ASCII filename for this first write-enabled release.",
+            )
+            return
+        if len(encoded_name) > 31 or "/" in target_name or "\\" in target_name:
+            QMessageBox.warning(
+                self,
+                "Invalid filename",
+                "Card filenames must be 31 characters or fewer and cannot contain slashes.",
+            )
+            return
+
+        existing = {item.name for item in save.files}
+        replace = target_name in existing
+        card_path = f"/{save.folder}/{target_name}"
+        action = "replace" if replace else "add"
+        answer = QMessageBox.warning(
+            self,
+            "Confirm card write",
+            f"Memory Prism will {action} {card_path}.\n\n"
+            "A full safety backup will be created automatically before writing. "
+            "Keep the adapter and card connected until verification finishes.",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        self.pages.setCurrentIndex(1)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_text.setText("Creating a full safety backup")
+        self.set_busy(True)
+        self.thread = QThread()
+        worker = WriteFileWorker(source, card_path)
+        self.worker = worker
+        worker.moveToThread(self.thread)
+        self.thread.started.connect(worker.run)
+        worker.progress.connect(self.update_progress)
+        worker.completed.connect(self.write_complete)
+        worker.failed.connect(self.write_failed)
+        worker.completed.connect(self.thread.quit)
+        worker.failed.connect(self.thread.quit)
+        self.thread.finished.connect(worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.start()
+
+    def write_complete(self, result: WriteResult) -> None:
+        self.snapshot = result.snapshot
+        self.populate(result.snapshot)
+        self.set_busy(False)
+        self.pages.setCurrentIndex(2)
+        QMessageBox.information(
+            self,
+            "Write verified",
+            f"{result.card_path} was written and verified.\n\n"
+            f"Changed pages: {result.pages_written}\n"
+            f"Safety backup: {result.backup}",
+        )
+
+    def write_failed(self, message: str) -> None:
+        self.set_busy(False)
+        self.pages.setCurrentIndex(2 if self.snapshot else 0)
+        QMessageBox.critical(
+            self,
+            "Card write stopped",
+            f"{message}\n\nThe operation stopped. Do not attempt another write until the card "
+            "has been checked against the safety backup.",
         )
 
     def export_save(self) -> None:

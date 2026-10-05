@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.0 - 2026-10-05
+
+- Added protected physical-card file writes for updating `.elf` and other files.
+- Added automatic full-card safety backups before every write.
+- Added changed-card and capacity checks before programming begins.
+- Added PS2 spare-data ECC generation and page-by-page read-back verification.
+- Added recovery for PowerWave adapters using the negotiated `0x55` terminator.
+- Kept writes unavailable while browsing standalone backup images.
+
 ## v0.3.0 - 2026-08-22
 
 - Added semantic version numbers to the application and AppImage builds.

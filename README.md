@@ -8,12 +8,14 @@ card adapter. It combines a practical save manager with a PS2-inspired 3D
 browser that renders the textured, animated icon models stored inside the
 saves. No PS2 BIOS or emulator is required.
 
-![Memory Prism showing real save icons](docs/memory-prism-v0.3.0.png)
+![Memory Prism showing real save icons](docs/memory-prism-v0.4.0.png)
+
 <img width="1189" height="792" alt="memscreen" src="https://github.com/user-attachments/assets/bf8ace6d-d0ae-4333-96ce-da9fd0c246e3" />
 
-> [!IMPORTANT]
-> Adapter access is read-only in v0.3.0. Memory Prism cannot alter or erase a
-> physical card.
+> [!WARNING]
+> Physical-card writing is experimental in v0.4.0. Memory Prism creates a full
+> safety backup and verifies each changed page, but an unplugged adapter, power
+> loss, failing card, or unsupported clone can still corrupt card data.
 
 ## Features
 
@@ -23,6 +25,9 @@ saves. No PS2 BIOS or emulator is required.
 - PS2-inspired full-screen icon browser with keyboard and mouse navigation
 - Complete `.ps2` memory card backups
 - `.psu` export from complete card images
+- Add or replace individual files, including `.elf` programs, on a physical card
+- Automatic dated safety backup before every write
+- Card identity checks, PS2 ECC generation, and page-by-page read-back verification
 - Browsing of existing `.ps2` backup files without hardware attached
 - Support for standard 8 MB cards and tested third-party 64 MB cards
 - Automatic card-swap recovery and retry handling for unstable adapters
@@ -39,17 +44,17 @@ Only PS2 memory cards are supported by the graphical application at present.
 
 ## Install the AppImage
 
-1. Download `Memory-Prism-v0.3.0-x86_64.AppImage` from the latest release.
+1. Download `Memory-Prism-v0.4.0-x86_64.AppImage` from the latest release.
 2. Make it executable:
 
    ```bash
-   chmod +x Memory-Prism-v0.3.0-x86_64.AppImage
+   chmod +x Memory-Prism-v0.4.0-x86_64.AppImage
    ```
 
 3. Run it:
 
    ```bash
-   ./Memory-Prism-v0.3.0-x86_64.AppImage
+   ./Memory-Prism-v0.4.0-x86_64.AppImage
    ```
 
 If the adapter is found but cannot be opened, install the included USB rule:
@@ -71,6 +76,20 @@ without the `plugdev` group, create it or adjust the group in the rule.
 - Choose **PS2 Browser** for the console-inspired 3D view.
 - Use the arrow keys or mouse to select icons; press Escape to return.
 - Drag the large icon in the card manager to rotate its 3D model.
+
+## Write or update a file
+
+1. Choose **Read card** so Memory Prism knows which physical card is present.
+2. Select the save or system folder that should receive the file.
+3. Choose **Write file to card**, select the local file, and confirm its card
+   filename. Selecting an existing filename replaces it; a new name adds it.
+4. Keep the adapter and card connected while the full backup, write, and
+   verification stages run.
+
+Safety backups are stored in
+`~/.local/share/memory-prism/safety-backups/`. This first write-enabled release
+supports files inside existing folders; creating and deleting whole save
+folders remains a future step.
 
 Card swaps can take a moment while the adapter resets and authenticates the
 new card. Keep the adapter connected, change the card, and choose **Read card**
@@ -105,7 +124,8 @@ AppImage packaging tool, so an internet connection is required.
 
 ## Current limitations
 
-- Physical cards are read-only; write support is not enabled.
+- Physical-card writing is experimental and currently limited to files inside
+  existing folders.
 - The AppImage currently targets x86-64 Linux.
 - Some unusual or malformed save icons may fall back to a static preview.
 - Official Sony adapter compatibility has not yet had the same amount of

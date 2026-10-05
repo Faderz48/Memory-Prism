@@ -29,7 +29,48 @@ CARD_IV_2 = bytes.fromhex("2CD160FA8C2ED362")
 CHALLENGE_IV = bytes.fromhex("2C5BF48D32749127")
 MECHA_NONCE = bytes.fromhex("DEADC0DEDEADC0DE")
 POWERWAVE_TERMINATOR = 0x5A
-AUTH_TERMINATORS = (POWERWAVE_TERMINATOR, 0xFF)
+AUTH_TERMINATORS = (POWERWAVE_TERMINATOR, 0x55, 0xFF)
+
+ECC_XOR_TABLE = bytes.fromhex(
+    "00 87 96 11 a5 22 33 b4 b4 33 22 a5 11 96 87 00 "
+    "c3 44 55 d2 66 e1 f0 77 77 f0 e1 66 d2 55 44 c3 "
+    "d2 55 44 c3 77 f0 e1 66 66 e1 f0 77 c3 44 55 d2 "
+    "11 96 87 00 b4 33 22 a5 a5 22 33 b4 00 87 96 11 "
+    "e1 66 77 f0 44 c3 d2 55 55 d2 c3 44 f0 77 66 e1 "
+    "22 a5 b4 33 87 00 11 96 96 11 00 87 33 b4 a5 22 "
+    "33 b4 a5 22 96 11 00 87 87 00 11 96 22 a5 b4 33 "
+    "f0 77 66 e1 55 d2 c3 44 44 c3 d2 55 e1 66 77 f0 "
+    "f0 77 66 e1 55 d2 c3 44 44 c3 d2 55 e1 66 77 f0 "
+    "33 b4 a5 22 96 11 00 87 87 00 11 96 22 a5 b4 33 "
+    "22 a5 b4 33 87 00 11 96 96 11 00 87 33 b4 a5 22 "
+    "e1 66 77 f0 44 c3 d2 55 55 d2 c3 44 f0 77 66 e1 "
+    "11 96 87 00 b4 33 22 a5 a5 22 33 b4 00 87 96 11 "
+    "d2 55 44 c3 77 f0 e1 66 66 e1 f0 77 c3 44 55 d2 "
+    "c3 44 55 d2 66 e1 f0 77 77 f0 e1 66 d2 55 44 c3 "
+    "00 87 96 11 a5 22 33 b4 b4 33 22 a5 11 96 87 00"
+)
+
+
+def page_ecc(page: bytes) -> bytes:
+    if len(page) != 512:
+        raise ValueError("A PS2 memory card page must contain 512 bytes")
+    result = bytearray()
+    for offset in range(0, 512, 128):
+        column = line_a = line_b = 0
+        for index, value in enumerate(page[offset : offset + 128]):
+            parity = ECC_XOR_TABLE[value]
+            column ^= parity
+            if parity & 0x80:
+                line_a ^= (~index) & 0xFF
+                line_b ^= index
+        result.extend(
+            (
+                (~column) & 0x77,
+                (~line_a) & 0x7F,
+                (~line_b) & 0x7F,
+            )
+        )
+    return bytes(result) + bytes(4)
 
 
 class AdapterError(RuntimeError):
@@ -333,6 +374,69 @@ class PowerWaveReader:
                 f"Page {page_number} read failed ({status:02x}, {len(data)} bytes)"
             )
         return data
+
+    def write_page(self, page_number: int, data: bytes, verify: bool = True) -> None:
+        if page_number < 0:
+            raise ValueError("Page number cannot be negative")
+        if len(data) == 512:
+            data = data + page_ecc(data)
+        if len(data) != 528:
+            raise ValueError("A writable PS2 page must contain 512 or 528 bytes")
+
+        self.authenticate()
+        self._command(b"\x57\x03" + struct.pack("<I", page_number) + data + b"\x55\x2b")
+        response = self._response()
+        if response != b"\x5a":
+            raise AdapterError(
+                f"Page {page_number} write failed ({response.hex(' ')})"
+            )
+        if verify and self.read_page(page_number)[:512] != data[:512]:
+            raise AdapterError(f"Page {page_number} failed read-back verification")
+
+    def write_image_changes(
+        self,
+        original: Path,
+        modified: Path,
+        progress: Callable[[int, int], None] | None = None,
+    ) -> int:
+        before = original.read_bytes()
+        after = modified.read_bytes()
+        if len(before) != len(after) or len(before) % 512:
+            raise AdapterError("The staged card image has an unexpected size")
+
+        info = self.info()
+        if len(before) != info.capacity:
+            raise AdapterError(
+                "The inserted card capacity does not match the safety backup"
+            )
+
+        changed = [
+            page
+            for page in range(info.page_count)
+            if before[page * 512 : (page + 1) * 512]
+            != after[page * 512 : (page + 1) * 512]
+        ]
+        if not changed:
+            return 0
+
+        samples = {0, info.page_count // 3, info.page_count // 2, info.page_count - 1}
+        samples.update(changed)
+        for page in sorted(samples):
+            expected = before[page * 512 : (page + 1) * 512]
+            if self.read_page(page)[:512] != expected:
+                raise AdapterError(
+                    "The inserted card changed after the safety backup; write cancelled"
+                )
+
+        total = len(changed)
+        # Card data normally lives after allocation metadata. Writing from the
+        # end toward the start keeps most file data ahead of FAT/directory pages.
+        for done, page in enumerate(reversed(changed), 1):
+            offset = page * 512
+            self.write_page(page, after[offset : offset + 512], verify=True)
+            if progress:
+                progress(done, total)
+        return total
 
     def info(self) -> CardInfo:
         card_type = self.card_type()
